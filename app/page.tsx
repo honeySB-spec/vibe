@@ -7,7 +7,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
 import { Wallet, Sparkles, Trophy, Zap, ShieldCheck, Heart, Copy } from "lucide-react";
-import confetti from "canvas-confetti"; // Optional: adds a nice pop effect
+import confetti from "canvas-confetti";
+import { ConnectButton } from "@rainbow-me/rainbowkit";
 
 export default function ConsensusCode() {
   const [status, setStatus] = useState<"idle" | "gen" | "done" | "paid">("idle");
@@ -39,9 +40,14 @@ export default function ConsensusCode() {
         <span className="font-bold text-sm tracking-tight flex items-center gap-2">
           <div className="w-3 h-3 bg-black rounded-sm" /> ConsensusCode
         </span>
-        <Button variant="outline" size="sm" className="h-8 text-xs gap-2 rounded-full">
-          <Wallet className="w-3 h-3" /> Connect
-        </Button>
+        {/* PASTE THIS - It uses your minimalist theme automatically */}
+        <div className="flex items-center gap-3">
+          <ConnectButton
+            showBalance={false}
+            accountStatus="address"
+            chainStatus="icon"
+          />
+        </div>
       </header>
 
       {/* VERTICAL LAYOUT */}
