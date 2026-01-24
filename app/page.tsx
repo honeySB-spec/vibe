@@ -9,6 +9,8 @@ import { Badge } from "@/components/ui/badge";
 import { Zap, ShieldCheck, Heart, Sparkles, CheckCircle, Flame } from "lucide-react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import confetti from "canvas-confetti";
+import Link from "next/link";
+import { History } from "lucide-react"; // Import History icon
 
 // Blockchain Imports
 import { useWriteContract, useWaitForTransactionReceipt } from "wagmi";
@@ -55,8 +57,10 @@ export default function ConsensusCode() {
     }
   };
 
-  const handleTip = (modelName: string) => {
-    // Demo wallet addresses
+  // Updated handleTip accepts the winner's name, but uses state for the codes
+  const handleTip = (winnerModelName: string) => {
+
+    // Demo wallet logic
     const modelWallet = "0x1234567890123456789012345678901234567890";
 
     try {
@@ -64,10 +68,11 @@ export default function ConsensusCode() {
         address: CONTRACT_ADDRESS,
         abi: CONSENSUS_ABI,
         functionName: "tipModel",
-        args: [modelWallet, modelName],
+        // We pass the winner's name, but BOTH code blocks
+        args: [modelWallet, winnerModelName, gptCode, geminiCode],
         value: parseEther("0.0001"),
       });
-      setWinner(modelName);
+      setWinner(winnerModelName);
     } catch (error) {
       console.error("Tx Failed", error);
     }
@@ -88,6 +93,15 @@ export default function ConsensusCode() {
           <div className="w-3 h-3 bg-black rounded-sm" /> ConsensusCode
         </span>
         <ConnectButton showBalance={false} accountStatus="address" chainStatus="icon" />
+
+        <div className="flex items-center gap-3">
+          <Link href="/history">
+            <Button variant="ghost" size="sm" className="h-8 text-xs gap-2 text-zinc-500 hover:text-black">
+              <History className="w-3 h-3" /> History
+            </Button>
+          </Link>
+          <ConnectButton showBalance={false} accountStatus="address" chainStatus="icon" />
+        </div>
       </header>
 
       <ResizablePanelGroup direction="vertical" autoSaveId="cc-real-ai-v2" className="flex-1">
@@ -128,9 +142,9 @@ export default function ConsensusCode() {
               color="text-emerald-600 bg-emerald-50 border-emerald-100"
               icon={<Zap className="w-3 h-3" />}
               status={status}
-              code={gptCode}
               isWinner={winner === "GPT-4 Turbo"}
               hasWinner={!!winner}
+              code={gptCode}
               onTip={() => handleTip("GPT-4 Turbo")}
               isPending={isPending && winner === "GPT-4 Turbo"}
             />
@@ -144,9 +158,9 @@ export default function ConsensusCode() {
               color="text-blue-600 bg-blue-50 border-blue-100"
               icon={<Flame className="w-3 h-3" />}
               status={status}
-              code={geminiCode}
               isWinner={winner === "Gemini 1.5 Pro"}
               hasWinner={!!winner}
+              code={geminiCode}
               onTip={() => handleTip("Gemini 1.5 Pro")}
               isPending={isPending && winner === "Gemini 1.5 Pro"}
             />
