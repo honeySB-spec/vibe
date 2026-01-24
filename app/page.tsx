@@ -271,7 +271,7 @@ export default function ConsensusCode() {
           <div className="w-4 h-4 bg-black rounded-md flex items-center justify-center">
             <div className="w-1.5 h-1.5 bg-white rounded-full" />
           </div>
-          ConsensusCode <span className="text-zinc-400 font-normal">AI Agent</span>
+          Vibe-CHECK <span className="text-zinc-400 font-normal">AI Agent</span>
         </span>
         <div className="flex items-center gap-3">
           <Link href="/history">
