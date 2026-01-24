@@ -1,129 +1,354 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import Link from "next/link";
 import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
 import { Textarea } from "@/components/ui/textarea";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Badge } from "@/components/ui/badge";
-import { Zap, ShieldCheck, Heart, Sparkles, CheckCircle, Flame } from "lucide-react";
+import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Zap, Heart, Sparkles, CheckCircle, Flame, Send, Bot, User as UserIcon, CreditCard, Wallet, Coins, History } from "lucide-react";
 import { ConnectButton } from "@rainbow-me/rainbowkit";
 import confetti from "canvas-confetti";
-import Link from "next/link";
-import { History } from "lucide-react"; // Import History icon
 
 // Blockchain Imports
-import { useWriteContract, useWaitForTransactionReceipt } from "wagmi";
-import { parseEther } from "viem";
-// Note: Depending on your tsconfig, this might need to be "../src/abi" or "@/src/abi"
+import { useWriteContract, useWaitForTransactionReceipt, useAccount, useSendTransaction } from "wagmi";
+import { parseEther, formatEther } from "viem";
 import { CONSENSUS_ABI, CONTRACT_ADDRESS } from "@/src/abi";
+import { getSessionAccount, createSessionClient, publicClient } from "@/lib/session";
+
+type Message = {
+  role: "user" | "assistant";
+  content: string;
+  isPayment?: boolean; // New flag to style payment messages differently
+};
 
 export default function ConsensusCode() {
-  const [status, setStatus] = useState<"idle" | "gen" | "done" | "paid">("idle");
-  const [prompt, setPrompt] = useState("");
+  // --- STATE ---
+  const [messages, setMessages] = useState<Message[]>([
+    { role: "assistant", content: "I'm ready. I can pay autonomously if you fund my Session Wallet! Just say 'Enable Auto-Pay'." }
+  ]);
+  const [input, setInput] = useState("");
+  const [isTyping, setIsTyping] = useState(false);
   const [winner, setWinner] = useState<string | null>(null);
 
-  // Real AI Results State
-  const [gptCode, setGptCode] = useState("");
-  const [geminiCode, setGeminiCode] = useState("");
+  // Result State
+  const [gptResult, setGptResult] = useState<any>(null);
+  const [geminiResult, setGeminiResult] = useState<any>(null);
 
+  // Session Wallet State
+  const [sessionBalance, setSessionBalance] = useState<string>("0");
+  const [sessionAddress, setSessionAddress] = useState<string>("");
+
+  const scrollRef = useRef<HTMLDivElement>(null);
+
+  // Blockchain Hooks
   const { data: hash, writeContract, isPending } = useWriteContract();
+  const { sendTransaction } = useSendTransaction();
   const { isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
+  const { address: userAddress, isConnected } = useAccount();
 
-  // --- REAL AI GENERATOR ---
-  const handleRealGenerate = async () => {
-    if (!prompt) return;
-    setStatus("gen");
+  // --- 0. SESSION INIT & POLLING ---
+  useEffect(() => {
+    const account = getSessionAccount();
+    if (account) {
+      setSessionAddress(account.address);
+      updateSessionBalance(account.address);
+    }
+
+    const interval = setInterval(() => {
+      if (account) updateSessionBalance(account.address);
+    }, 5000); // Poll every 5s
+
+    return () => clearInterval(interval);
+  }, []);
+
+  const updateSessionBalance = async (address: string) => {
+    const bal = await publicClient.getBalance({ address: address as `0x${string}` });
+    setSessionBalance(formatEther(bal));
+  };
+
+  // --- 1. THE AGENTIC LOGIC ---
+  const handleSendMessage = async () => {
+    if (!input.trim()) return;
+
+    const userText = input.trim();
+    const userMsg: Message = { role: "user", content: userText };
+
+    // Update UI immediately
+    setMessages((prev) => [...prev, userMsg]);
+    setInput("");
+
+    const lowerInput = userText.toLowerCase();
+
+    // SPECIAL COMMAND: FUND SESSION
+    if (lowerInput.includes("enable auto") || lowerInput.includes("fund agent")) {
+      if (!userAddress) {
+        addBotMessage("Please connect your main wallet first (Top Right).");
+        return;
+      }
+      addBotMessage("⚡️ Creating Auth Transaction... Please sign to fund your local Session Wallet with 0.002 ETH.");
+      handleFundSession();
+      return;
+    }
+
+    // A. CHECK FOR PAYMENT COMMANDS
+    const isTipCommand = lowerInput.includes("tip") || lowerInput.includes("pay");
+
+    if (isTipCommand) {
+      if (lowerInput.includes("gpt") || lowerInput.includes("openai")) {
+        if (!gptResult) {
+          addBotMessage("I can't tip GPT yet because no code has been generated. Ask me to write code first!");
+          return;
+        }
+        handleSmartTip(gptResult);
+        return;
+      }
+
+      if (lowerInput.includes("gemini") || lowerInput.includes("google")) {
+        if (!geminiResult) {
+          addBotMessage("I can't tip Gemini yet because no code has been generated.");
+          return;
+        }
+        handleSmartTip(geminiResult);
+        return;
+      }
+
+      addBotMessage("Which model do you want to tip? Please say 'Tip GPT' or 'Tip Gemini'.");
+      return;
+    }
+
+    // B. GENERATION / CHAT REQUEST
+    setIsTyping(true);
     setWinner(null);
-    setGptCode("");
-    setGeminiCode("");
 
     try {
       const res = await fetch("/api/generate", {
         method: "POST",
-        body: JSON.stringify({ prompt }),
+        body: JSON.stringify({ prompt: userText, messages }),
       });
 
       const data = await res.json();
 
-      if (data.gpt && data.gemini) {
-        setGptCode(data.gpt);
-        setGeminiCode(data.gemini);
-        setStatus("done");
+      if (data.reply) {
+        addBotMessage(data.reply);
+      }
+      else if (data.results) {
+        setGptResult(data.results[0]);
+        setGeminiResult(data.results[1]);
+        addBotMessage("I've generated the comparisons. Review the code. To Auto-Pay, ensure Agent Balance > 0.");
       }
     } catch (e) {
       console.error(e);
-      setStatus("idle");
+      addBotMessage("Sorry, I encountered an error. Please try again.");
+    } finally {
+      setIsTyping(false);
     }
   };
 
-  // Updated handleTip accepts the winner's name, but uses state for the codes
-  const handleTip = (winnerModelName: string) => {
+  const addBotMessage = (text: string, isPayment = false) => {
+    setMessages((prev) => [...prev, { role: "assistant", content: text, isPayment }]);
+  };
 
-    // Demo wallet logic
-    const modelWallet = "0x1234567890123456789012345678901234567890";
+  useEffect(() => {
+    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [messages, isTyping]);
+
+
+  // --- 2. SMART TIPPING ROUTER ---
+  const handleSmartTip = async (model: any) => {
+    // Check Session Balance
+    const currentBal = parseFloat(sessionBalance);
+
+    if (currentBal > 0.0002) {
+      // USE SESSION WALLET (AUTONOMOUS)
+      addBotMessage(`⚡️ Auto-Paying ${model.model} via Session Wallet... (Silent TX)`, true);
+      await handleSessionTip(model);
+    } else {
+      // USE MAIN WALLET (MANUAL FALLBACK)
+      addBotMessage(`⚠️ Session Wallet empty. Requesting signature from Main Wallet...`, true);
+      handleMainWalletTip(model);
+    }
+  }
+
+  // A. MAIN WALLET TIP (Standard Wagmi)
+  const handleMainWalletTip = (selectedModel: any) => {
+    if (!selectedModel?.paymentTarget) return;
 
     try {
       writeContract({
         address: CONTRACT_ADDRESS,
         abi: CONSENSUS_ABI,
         functionName: "tipModel",
-        // We pass the winner's name, but BOTH code blocks
-        args: [modelWallet, winnerModelName, gptCode, geminiCode],
+        args: [
+          selectedModel.paymentTarget,
+          selectedModel.model,
+          gptResult?.code || "",
+          geminiResult?.code || ""
+        ],
         value: parseEther("0.0001"),
       });
-      setWinner(winnerModelName);
+      setWinner(selectedModel.model);
     } catch (error) {
       console.error("Tx Failed", error);
     }
   };
 
+  // B. SESSION WALLET TIP (Silent Viem)
+  const handleSessionTip = async (selectedModel: any) => {
+    try {
+      const client = createSessionClient();
+      if (!client) return;
+
+      if (!selectedModel?.paymentTarget) {
+        addBotMessage("Cannot tip: Invalid Wallet Address (Model failed?)");
+        return;
+      }
+
+      const hash = await client.writeContract({
+        address: CONTRACT_ADDRESS,
+        abi: CONSENSUS_ABI,
+        functionName: "tipModel",
+        args: [
+          selectedModel.paymentTarget,
+          selectedModel.model,
+          gptResult?.code || "",
+          geminiResult?.code || ""
+        ],
+        value: parseEther("0.0001")
+      });
+
+      console.log("Silent Hash:", hash);
+      setWinner(selectedModel.model);
+      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+      addBotMessage(`✅ Auto-Payment Successful! TX: ${hash.substring(0, 10)}...`, true);
+
+    } catch (e: any) {
+      console.error("Session Tip Failed", e);
+      addBotMessage(`❌ Auto-Pay failed: ${e.message}. Try manual tip.`);
+    }
+  };
+
+  // C. FUND SESSION
+  const handleFundSession = () => {
+    if (!sessionAddress) return;
+
+    if (!isConnected) {
+      addBotMessage("Please connect your main wallet first.");
+      return;
+    }
+
+    try {
+      addBotMessage(`⚡️ Requesting User Wallet to send 0.002 ETH to Session Agent...`);
+
+      sendTransaction({
+        to: sessionAddress as `0x${string}`,
+        value: parseEther("0.002")
+      });
+
+    } catch (e: any) {
+      console.error("Funding Failed", e);
+      addBotMessage(`❌ Funding request failed: ${e.message}`);
+    }
+  }
+
+
+  // Success Effect
   useEffect(() => {
     if (isConfirmed) {
-      setStatus("paid");
       confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
+      addBotMessage("Transaction confirmed on Base Sepolia! 🏆", true);
     }
   }, [isConfirmed]);
 
   return (
     <main className="h-screen w-full flex flex-col bg-white text-zinc-900 font-sans overflow-hidden">
 
-      <header className="h-12 border-b flex items-center justify-between px-4 bg-white/80 backdrop-blur z-50">
+      {/* HEADER */}
+      <header className="h-14 border-b flex items-center justify-between px-4 bg-white/80 backdrop-blur z-50">
         <span className="font-bold text-sm tracking-tight flex items-center gap-2">
-          <div className="w-3 h-3 bg-black rounded-sm" /> ConsensusCode
+          <div className="w-4 h-4 bg-black rounded-md flex items-center justify-center">
+            <div className="w-1.5 h-1.5 bg-white rounded-full" />
+          </div>
+          ConsensusCode <span className="text-zinc-400 font-normal">AI Agent</span>
         </span>
-
-
         <div className="flex items-center gap-3">
           <Link href="/history">
-            <Button variant="ghost" size="sm" className="h-8 text-xs gap-2 text-zinc-500 hover:text-black">
-              <History className="w-3 h-3" /> History
+            <Button variant="ghost" size="sm" className="gap-2 text-zinc-500 hover:text-black">
+              <History className="w-4 h-4" /> History
             </Button>
           </Link>
+          {/* AGENT BALANCE INDICATOR */}
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 rounded-full border border-zinc-200">
+            <Bot className="w-3.5 h-3.5 text-zinc-500" />
+            <span className="text-xs font-medium text-zinc-600">Auto-Pay Bal:</span>
+            <span className={`text-xs font-bold ${parseFloat(sessionBalance) > 0.0002 ? "text-green-600" : "text-red-500"}`}>
+              {parseFloat(sessionBalance).toFixed(4)} ETH
+            </span>
+          </div>
           <ConnectButton showBalance={false} accountStatus="address" chainStatus="icon" />
         </div>
       </header>
 
-      <ResizablePanelGroup direction="vertical" autoSaveId="cc-real-ai-v2" className="flex-1">
+      {/* ... Rest of UI same as before ... */}
+      <ResizablePanelGroup direction="horizontal" className="flex-1">
+        {/* ... (Panel contents) ... */}
+        {/* --- LEFT: CHAT AGENT --- */}
+        <ResizablePanel defaultSize={35} minSize={500} maxSize={5000} className="bg-zinc-50 flex flex-col border-r border-zinc-200">
+          <ScrollArea className="flex-1 p-4">
+            <div className="flex flex-col gap-4 pb-4">
+              {messages.map((msg, i) => (
+                <div key={i} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
+                  <Avatar className="w-8 h-8 border border-zinc-200">
+                    <AvatarFallback className={msg.role === "user" ? "bg-black text-white" : "bg-white"}>
+                      {msg.role === "user" ? <UserIcon className="w-4 h-4" /> : <Bot className="w-4 h-4 text-zinc-500" />}
+                    </AvatarFallback>
+                  </Avatar>
 
-        {/* INPUT AREA */}
-        <ResizablePanel defaultSize={35} minSize={20} className="bg-zinc-50/50 p-6 flex flex-col items-center justify-center">
-          <div className="w-full max-w-3xl relative">
-            <Textarea
-              value={prompt}
-              onChange={(e) => setPrompt(e.target.value)}
-              placeholder="Describe your smart contract (e.g. 'A voting system where users can vote only once')..."
-              className="min-h-[120px] resize-none border-zinc-200 shadow-sm p-4 text-sm rounded-xl focus-visible:ring-1 focus-visible:ring-black pr-32"
-            />
-            <div className="absolute bottom-3 right-3">
+                  <div className={`p-3 rounded-lg text-sm max-w-[85%] leading-relaxed ${msg.role === "user"
+                    ? "bg-black text-white rounded-tr-none"
+                    : msg.isPayment
+                      ? "bg-green-50 border border-green-200 text-green-800 rounded-tl-none"
+                      : "bg-white border border-zinc-200 text-zinc-700 rounded-tl-none"
+                    }`}>
+                    {msg.isPayment && <CreditCard className="w-3 h-3 mb-1 inline-block mr-2" />}
+                    {msg.content}
+                  </div>
+                </div>
+              ))}
+              {isTyping && (
+                <div className="flex gap-3">
+                  <Avatar className="w-8 h-8"><AvatarFallback><Bot className="w-4 h-4 animate-pulse" /></AvatarFallback></Avatar>
+                  <div className="bg-white border border-zinc-200 p-3 rounded-lg rounded-tl-none">
+                    <div className="flex gap-1">
+                      <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
+                      <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
+                      <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce"></span>
+                    </div>
+                  </div>
+                </div>
+              )}
+              <div ref={scrollRef} />
+            </div>
+          </ScrollArea>
+
+          <div className="p-4 bg-white border-t border-zinc-200">
+            <div className="relative">
+              <Textarea
+                value={input}
+                onChange={(e) => setInput(e.target.value)}
+                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
+                placeholder="Type 'Enable Auto-Pay', or 'Tip GPT'..."
+                className="min-h-[60px] pr-12 resize-none rounded-xl text-sm focus-visible:ring-black"
+              />
               <Button
-                onClick={handleRealGenerate}
-                disabled={status === "gen" || !prompt}
-                size="sm"
-                className="bg-black text-white hover:bg-zinc-800 rounded-lg shadow-md transition-all"
+                size="icon"
+                onClick={handleSendMessage}
+                disabled={!input.trim() || isTyping}
+                className="absolute bottom-2 right-2 h-8 w-8 bg-black hover:bg-zinc-800 rounded-lg"
               >
-                {status === "gen" ? <Zap className="w-3 h-3 animate-spin mr-2" /> : <Sparkles className="w-3 h-3 mr-2 text-yellow-300" />}
-                {status === "gen" ? "Synthesizing..." : "Generate Comparison"}
+                <Send className="w-4 h-4 text-white" />
               </Button>
             </div>
           </div>
@@ -131,58 +356,47 @@ export default function ConsensusCode() {
 
         <ResizableHandle withHandle className="bg-zinc-100" />
 
-        {/* RESULTS ARENA */}
         <ResizablePanel defaultSize={65}>
           <ResizablePanelGroup direction="horizontal">
-
-            {/* LEFT: OPENAI */}
             <ResultPanel
               name="GPT-4 Turbo"
               tag="OpenAI"
               color="text-emerald-600 bg-emerald-50 border-emerald-100"
               icon={<Zap className="w-3 h-3" />}
-              status={status}
+              status={isTyping ? "gen" : (gptResult ? "done" : "idle")}
+              code={gptResult?.code || ""}
               isWinner={winner === "GPT-4 Turbo"}
               hasWinner={!!winner}
-              code={gptCode}
-              onTip={() => handleTip("GPT-4 Turbo")}
-              isPending={isPending && winner === "GPT-4 Turbo"}
             />
 
             <ResizableHandle className="bg-zinc-100 w-[1px]" />
 
-            {/* RIGHT: GEMINI */}
             <ResultPanel
               name="Gemini 1.5 Pro"
               tag="Google DeepMind"
               color="text-blue-600 bg-blue-50 border-blue-100"
               icon={<Flame className="w-3 h-3" />}
-              status={status}
+              status={isTyping ? "gen" : (geminiResult ? "done" : "idle")}
+              code={geminiResult?.code || ""}
               isWinner={winner === "Gemini 1.5 Pro"}
               hasWinner={!!winner}
-              code={geminiCode}
-              onTip={() => handleTip("Gemini 1.5 Pro")}
-              isPending={isPending && winner === "Gemini 1.5 Pro"}
             />
-
           </ResizablePanelGroup>
         </ResizablePanel>
+
       </ResizablePanelGroup>
     </main>
   );
 }
 
-// Sub-component
-// Replace the existing ResultPanel function at the bottom of src/app/page.tsx with this:
-
-function ResultPanel({ name, tag, color, icon, status, code, isWinner, hasWinner, onTip, isPending }: any) {
+// Minimal Result Panel (Removed the button since Chat handles it now)
+function ResultPanel({ name, tag, color, icon, status, code, isWinner, hasWinner }: any) {
   return (
     <ResizablePanel
       defaultSize={50}
       className={`relative flex flex-col h-full transition-colors duration-500 ${isWinner ? "bg-green-50/30" : "bg-white"} ${hasWinner && !isWinner ? "opacity-50 grayscale" : ""}`}
     >
-      {/* 1. Header (Fixed Height) */}
-      <div className="h-10 border-b border-zinc-50 flex items-center justify-between px-4 bg-white/50 backdrop-blur z-10 flex-shrink-0">
+      <div className="h-12 border-b border-zinc-100 flex items-center justify-between px-4 bg-white/50 backdrop-blur z-10 flex-shrink-0">
         <div className="flex items-center gap-2">
           <span className="font-semibold text-xs text-zinc-700">{name}</span>
           {isWinner && <Badge className="bg-green-600 text-white hover:bg-green-600 h-5 text-[10px]">🏆 Winner</Badge>}
@@ -192,14 +406,18 @@ function ResultPanel({ name, tag, color, icon, status, code, isWinner, hasWinner
         )}
       </div>
 
-      {/* 2. Scroll Area Wrapper (The Fix: flex-1 min-h-0) */}
       <div className="flex-1 min-h-0 w-full relative">
         <ScrollArea className="h-full w-full">
           <div className="p-6 pb-24">
-            {status === "idle" || status === "gen" ? (
-              <div className="text-center pt-10 text-zinc-300 text-xs flex flex-col items-center gap-2">
-                {status === "gen" ? <Zap className="w-6 h-6 animate-spin text-zinc-200" /> : null}
-                {status === "gen" ? "Consulting AI Models..." : "Waiting for prompt..."}
+            {status === "idle" ? (
+              <div className="h-full flex flex-col items-center justify-center pt-20 text-zinc-300 text-xs gap-3">
+                <div className="p-3 bg-zinc-50 rounded-full"><Sparkles className="w-5 h-5 text-zinc-200" /></div>
+                <span>Agent waiting...</span>
+              </div>
+            ) : status === "gen" ? (
+              <div className="h-full flex flex-col items-center justify-center pt-20 text-zinc-400 text-xs gap-3">
+                <Zap className="w-6 h-6 animate-spin text-zinc-200" />
+                <span>Streaming code...</span>
               </div>
             ) : (
               <pre className="font-mono text-[11px] leading-6 text-zinc-600 selection:bg-black selection:text-white whitespace-pre-wrap break-all">
@@ -209,27 +427,9 @@ function ResultPanel({ name, tag, color, icon, status, code, isWinner, hasWinner
           </div>
         </ScrollArea>
 
-        {/* 3. Floating Button (Absolute Positioned over the Scroll Area) */}
-        {status === "done" && !hasWinner && (
-          <div className="absolute bottom-6 left-0 right-0 flex justify-center animate-in slide-in-from-bottom-4 duration-500 z-20 pointer-events-none">
-            {/* pointer-events-auto re-enables clicking on the button */}
-            <div className="pointer-events-auto">
-              <Button
-                onClick={onTip}
-                disabled={isPending}
-                className="shadow-xl bg-white text-black border border-zinc-200 hover:bg-zinc-50 hover:scale-105 transition-all rounded-full px-6 gap-2"
-              >
-                {isPending ? <Zap className="w-4 h-4 animate-spin" /> : <Heart className="w-4 h-4 text-red-500 fill-current" />}
-                {isPending ? "Confirming..." : "Tip 0.0001 ETH"}
-              </Button>
-            </div>
-          </div>
-        )}
-
-        {/* 4. Winner State */}
         {isWinner && (
           <div className="absolute bottom-6 left-0 right-0 flex justify-center animate-in zoom-in duration-300 z-20">
-            <Button variant="outline" className="bg-white border-green-200 text-green-700 gap-2 rounded-full cursor-default shadow-sm">
+            <Button variant="outline" className="bg-white border-green-200 text-green-700 gap-2 rounded-full cursor-default shadow-sm h-9">
               <CheckCircle className="w-4 h-4" /> Tip Sent!
             </Button>
           </div>

@@ -9,7 +9,9 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@coinbase/coinbase-sdk": "^0.25.0",
     "@google/generative-ai": "^0.24.1",
+    "@radix-ui/react-avatar": "^1.1.11",
     "@radix-ui/react-scroll-area": "^1.2.10",
     "@radix-ui/react-separator": "^1.1.8",
     "@radix-ui/react-slot": "^1.2.4",
@@ -21,10 +23,12 @@
     "clsx": "^2.1.1",
     "lucide-react": "^0.563.0",
     "next": "16.1.4",
+    "next-themes": "^0.4.6",
     "openai": "^6.16.0",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "react-resizable-panels": "^4.4.1",
+    "sonner": "^2.0.7",
     "tailwind-merge": "^3.4.0",
     "viem": "^2.44.4",
     "wagmi": "^2.19.5"
