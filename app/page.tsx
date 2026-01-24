@@ -92,7 +92,7 @@ export default function ConsensusCode() {
         <span className="font-bold text-sm tracking-tight flex items-center gap-2">
           <div className="w-3 h-3 bg-black rounded-sm" /> ConsensusCode
         </span>
-        <ConnectButton showBalance={false} accountStatus="address" chainStatus="icon" />
+
 
         <div className="flex items-center gap-3">
           <Link href="/history">
