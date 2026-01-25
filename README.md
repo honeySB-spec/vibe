@@ -1,5 +1,5 @@
 # Vibe Check: The Consensus Agent ⚡️🧠
-
+# Link: [vibe-brown-alpha.vercel.app](https://vibe-brown-alpha.vercel.app/)
 **Vibe Check** is a next-generation AI coding interface built on the **x402 Protocol**. It is designed to generate secure, high-quality Smart Contracts by leveraging **Consensus Intelligence**—comparing outputs from multiple top-tier AI models (OpenAI & Gemini) to ensure reliability.
 
 Just like a "Vibe Check" ensures a situation feels right, this agent "Checks" the code against two different "Brains" to ensure it's secure.
