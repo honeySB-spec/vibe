@@ -1,440 +1,235 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
 import Link from "next/link";
-import { ResizableHandle, ResizablePanel, ResizablePanelGroup } from "@/components/ui/resizable";
 import { Button } from "@/components/ui/button";
-import { Textarea } from "@/components/ui/textarea";
-import { ScrollArea } from "@/components/ui/scroll-area";
-import { Badge } from "@/components/ui/badge";
-import { Avatar, AvatarFallback } from "@/components/ui/avatar";
-import { Zap, Heart, Sparkles, CheckCircle, Flame, Send, Bot, User as UserIcon, CreditCard, Wallet, Coins, History } from "lucide-react";
-import { ConnectButton } from "@rainbow-me/rainbowkit";
-import confetti from "canvas-confetti";
+import { ArrowRight, Bot, Zap, ShieldCheck, Wallet, Sparkles } from "lucide-react";
+import { motion } from "framer-motion";
+import { ModeToggle } from "@/components/mode-toggle";
 
-// Blockchain Imports
-import { useWriteContract, useWaitForTransactionReceipt, useAccount, useSendTransaction } from "wagmi";
-import { parseEther, formatEther } from "viem";
-import { CONSENSUS_ABI, CONTRACT_ADDRESS } from "@/src/abi";
-import { getSessionAccount, createSessionClient, publicClient } from "@/lib/session";
+export default function LandingPage() {
+    return (
+        <div className="min-h-screen bg-background text-foreground selection:bg-foreground selection:text-background overflow-hidden flex flex-col">
 
-type Message = {
-  role: "user" | "assistant";
-  content: string;
-  isPayment?: boolean; // New flag to style payment messages differently
-};
+            {/* BACKGROUND ELEMENTS */}
+            {/* <div className="fixed inset-0 z-0 pointer-events-none">
+                <div className="absolute top-[-20%] left-[-10%] w-[50%] h-[50%] bg-purple-900/20 blur-[120px] rounded-full mix-blend-screen" />
+                <div className="absolute bottom-[-20%] right-[-10%] w-[50%] h-[50%] bg-blue-900/10 blur-[120px] rounded-full mix-blend-screen" />
+            </div> */}
 
-export default function ConsensusCode() {
-  // --- STATE ---
-  const [messages, setMessages] = useState<Message[]>([
-    { role: "assistant", content: "I'm ready. I can pay autonomously if you fund my Session Wallet! Just say 'Enable Auto-Pay'." }
-  ]);
-  const [input, setInput] = useState("");
-  const [isTyping, setIsTyping] = useState(false);
-  const [winner, setWinner] = useState<string | null>(null);
-
-  // Result State
-  const [gptResult, setGptResult] = useState<any>(null);
-  const [geminiResult, setGeminiResult] = useState<any>(null);
-
-  // Session Wallet State
-  const [sessionBalance, setSessionBalance] = useState<string>("0");
-  const [sessionAddress, setSessionAddress] = useState<string>("");
-
-  const scrollRef = useRef<HTMLDivElement>(null);
-
-  // Blockchain Hooks
-  const { data: hash, writeContract, isPending } = useWriteContract();
-  const { sendTransaction } = useSendTransaction();
-  const { isSuccess: isConfirmed } = useWaitForTransactionReceipt({ hash });
-  const { address: userAddress, isConnected } = useAccount();
-
-  // --- 0. SESSION INIT & POLLING ---
-  useEffect(() => {
-    const account = getSessionAccount();
-    if (account) {
-      setSessionAddress(account.address);
-      updateSessionBalance(account.address);
-    }
-
-    const interval = setInterval(() => {
-      if (account) updateSessionBalance(account.address);
-    }, 5000); // Poll every 5s
-
-    return () => clearInterval(interval);
-  }, []);
-
-  const updateSessionBalance = async (address: string) => {
-    const bal = await publicClient.getBalance({ address: address as `0x${string}` });
-    setSessionBalance(formatEther(bal));
-  };
-
-  // --- 1. THE AGENTIC LOGIC ---
-  const handleSendMessage = async () => {
-    if (!input.trim()) return;
-
-    const userText = input.trim();
-    const userMsg: Message = { role: "user", content: userText };
-
-    // Update UI immediately
-    setMessages((prev) => [...prev, userMsg]);
-    setInput("");
-
-    const lowerInput = userText.toLowerCase();
-
-    // SPECIAL COMMAND: FUND SESSION
-    if (lowerInput.includes("enable auto") || lowerInput.includes("fund agent")) {
-      if (!userAddress) {
-        addBotMessage("Please connect your main wallet first (Top Right).");
-        return;
-      }
-      addBotMessage("⚡️ Creating Auth Transaction... Please sign to fund your local Session Wallet with 0.002 ETH.");
-      handleFundSession();
-      return;
-    }
-
-    // A. CHECK FOR PAYMENT COMMANDS
-    const isTipCommand = lowerInput.includes("tip") || lowerInput.includes("pay");
-
-    if (isTipCommand) {
-      if (lowerInput.includes("gpt") || lowerInput.includes("openai")) {
-        if (!gptResult) {
-          addBotMessage("I can't tip GPT yet because no code has been generated. Ask me to write code first!");
-          return;
-        }
-        handleSmartTip(gptResult);
-        return;
-      }
-
-      if (lowerInput.includes("gemini") || lowerInput.includes("google")) {
-        if (!geminiResult) {
-          addBotMessage("I can't tip Gemini yet because no code has been generated.");
-          return;
-        }
-        handleSmartTip(geminiResult);
-        return;
-      }
-
-      addBotMessage("Which model do you want to tip? Please say 'Tip GPT' or 'Tip Gemini'.");
-      return;
-    }
-
-    // B. GENERATION / CHAT REQUEST
-    setIsTyping(true);
-    setWinner(null);
-
-    try {
-      const res = await fetch("/api/generate", {
-        method: "POST",
-        body: JSON.stringify({ prompt: userText, messages }),
-      });
-
-      const data = await res.json();
-
-      if (data.reply) {
-        addBotMessage(data.reply);
-      }
-      else if (data.results) {
-        setGptResult(data.results[0]);
-        setGeminiResult(data.results[1]);
-        addBotMessage("I've generated the comparisons. Review the code. To Auto-Pay, ensure Agent Balance > 0.");
-      }
-    } catch (e) {
-      console.error(e);
-      addBotMessage("Sorry, I encountered an error. Please try again.");
-    } finally {
-      setIsTyping(false);
-    }
-  };
-
-  const addBotMessage = (text: string, isPayment = false) => {
-    setMessages((prev) => [...prev, { role: "assistant", content: text, isPayment }]);
-  };
-
-  useEffect(() => {
-    scrollRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages, isTyping]);
-
-
-  // --- 2. SMART TIPPING ROUTER ---
-  const handleSmartTip = async (model: any) => {
-    // Check Session Balance
-    const currentBal = parseFloat(sessionBalance);
-
-    if (currentBal > 0.0002) {
-      // USE SESSION WALLET (AUTONOMOUS)
-      addBotMessage(`⚡️ Auto-Paying ${model.model} via Session Wallet... (Silent TX)`, true);
-      await handleSessionTip(model);
-    } else {
-      // USE MAIN WALLET (MANUAL FALLBACK)
-      addBotMessage(`⚠️ Session Wallet empty. Requesting signature from Main Wallet...`, true);
-      handleMainWalletTip(model);
-    }
-  }
-
-  // A. MAIN WALLET TIP (Standard Wagmi)
-  const handleMainWalletTip = (selectedModel: any) => {
-    if (!selectedModel?.paymentTarget) return;
-
-    try {
-      writeContract({
-        address: CONTRACT_ADDRESS,
-        abi: CONSENSUS_ABI,
-        functionName: "tipModel",
-        args: [
-          selectedModel.paymentTarget,
-          selectedModel.model,
-          gptResult?.code || "",
-          geminiResult?.code || ""
-        ],
-        value: parseEther("0.0001"),
-      });
-      setWinner(selectedModel.model);
-    } catch (error) {
-      console.error("Tx Failed", error);
-    }
-  };
-
-  // B. SESSION WALLET TIP (Silent Viem)
-  const handleSessionTip = async (selectedModel: any) => {
-    try {
-      const client = createSessionClient();
-      if (!client) return;
-
-      if (!selectedModel?.paymentTarget) {
-        addBotMessage("Cannot tip: Invalid Wallet Address (Model failed?)");
-        return;
-      }
-
-      const hash = await client.writeContract({
-        address: CONTRACT_ADDRESS,
-        abi: CONSENSUS_ABI,
-        functionName: "tipModel",
-        args: [
-          selectedModel.paymentTarget,
-          selectedModel.model,
-          gptResult?.code || "",
-          geminiResult?.code || ""
-        ],
-        value: parseEther("0.0001")
-      });
-
-      console.log("Silent Hash:", hash);
-      setWinner(selectedModel.model);
-      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
-      addBotMessage(`✅ Auto-Payment Successful! TX: ${hash.substring(0, 10)}...`, true);
-
-    } catch (e: any) {
-      console.error("Session Tip Failed", e);
-      addBotMessage(`❌ Auto-Pay failed: ${e.message}. Try manual tip.`);
-    }
-  };
-
-  // C. FUND SESSION
-  const handleFundSession = () => {
-    if (!sessionAddress) return;
-
-    if (!isConnected) {
-      addBotMessage("Please connect your main wallet first.");
-      return;
-    }
-
-    try {
-      addBotMessage(`⚡️ Requesting User Wallet to send 0.002 ETH to Session Agent...`);
-
-      sendTransaction({
-        to: sessionAddress as `0x${string}`,
-        value: parseEther("0.002")
-      });
-
-    } catch (e: any) {
-      console.error("Funding Failed", e);
-      addBotMessage(`❌ Funding request failed: ${e.message}`);
-    }
-  }
-
-
-  // Success Effect
-  useEffect(() => {
-    if (isConfirmed) {
-      confetti({ particleCount: 150, spread: 70, origin: { y: 0.6 } });
-      addBotMessage("Transaction confirmed on Base Sepolia! 🏆", true);
-    }
-  }, [isConfirmed]);
-
-  return (
-    <main className="h-screen w-full flex flex-col bg-white text-zinc-900 font-sans overflow-hidden">
-
-      {/* HEADER */}
-      <header className="h-14 border-b flex items-center justify-between px-4 bg-white/80 backdrop-blur z-50">
-        <span className="font-bold text-sm tracking-tight flex items-center gap-2">
-          <div className="w-4 h-4 bg-black rounded-md flex items-center justify-center">
-            <div className="w-1.5 h-1.5 bg-white rounded-full" />
-          </div>
-          ConsensusCode <span className="text-zinc-400 font-normal">AI Agent</span>
-        </span>
-        <div className="flex items-center gap-3">
-          <Link href="/history">
-            <Button variant="ghost" size="sm" className="gap-2 text-zinc-500 hover:text-black">
-              <History className="w-4 h-4" /> History
-            </Button>
-          </Link>
-          {/* AGENT BALANCE INDICATOR */}
-          <div className="flex items-center gap-2 px-3 py-1.5 bg-zinc-100 rounded-full border border-zinc-200">
-            <Bot className="w-3.5 h-3.5 text-zinc-500" />
-            <span className="text-xs font-medium text-zinc-600">Auto-Pay Bal:</span>
-            <span className={`text-xs font-bold ${parseFloat(sessionBalance) > 0.0002 ? "text-green-600" : "text-red-500"}`}>
-              {parseFloat(sessionBalance).toFixed(4)} ETH
-            </span>
-          </div>
-          <ConnectButton showBalance={false} accountStatus="address" chainStatus="icon" />
-        </div>
-      </header>
-
-      {/* ... Rest of UI same as before ... */}
-      <ResizablePanelGroup direction="horizontal" className="flex-1">
-        {/* ... (Panel contents) ... */}
-        {/* --- LEFT: CHAT AGENT --- */}
-        <ResizablePanel defaultSize={35} minSize={500} maxSize={5000} className="bg-zinc-50 flex flex-col border-r border-zinc-200">
-          <ScrollArea className="flex-1 p-4">
-            <div className="flex flex-col gap-4 pb-4">
-              {messages.map((msg, i) => (
-                <div key={i} className={`flex gap-3 ${msg.role === "user" ? "flex-row-reverse" : ""}`}>
-                  <Avatar className="w-8 h-8 border border-zinc-200">
-                    <AvatarFallback className={msg.role === "user" ? "bg-black text-white" : "bg-white"}>
-                      {msg.role === "user" ? <UserIcon className="w-4 h-4" /> : <Bot className="w-4 h-4 text-zinc-500" />}
-                    </AvatarFallback>
-                  </Avatar>
-
-                  <div className={`p-3 rounded-lg text-sm max-w-[85%] leading-relaxed ${msg.role === "user"
-                    ? "bg-black text-white rounded-tr-none"
-                    : msg.isPayment
-                      ? "bg-green-50 border border-green-200 text-green-800 rounded-tl-none"
-                      : "bg-white border border-zinc-200 text-zinc-700 rounded-tl-none"
-                    }`}>
-                    {msg.isPayment && <CreditCard className="w-3 h-3 mb-1 inline-block mr-2" />}
-                    {msg.content}
-                  </div>
-                </div>
-              ))}
-              {isTyping && (
-                <div className="flex gap-3">
-                  <Avatar className="w-8 h-8"><AvatarFallback><Bot className="w-4 h-4 animate-pulse" /></AvatarFallback></Avatar>
-                  <div className="bg-white border border-zinc-200 p-3 rounded-lg rounded-tl-none">
-                    <div className="flex gap-1">
-                      <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:-0.3s]"></span>
-                      <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce [animation-delay:-0.15s]"></span>
-                      <span className="w-1.5 h-1.5 bg-zinc-400 rounded-full animate-bounce"></span>
+            {/* NAVBAR */}
+            <nav className="relative z-50 flex items-center justify-between px-6 py-6 max-w-7xl mx-auto w-full">
+                <div className="flex items-center gap-2 font-bold text-xl tracking-tighter">
+                    <div className="w-8 h-8 bg-foreground rounded-lg flex items-center justify-center">
+                        <div className="w-3 h-3 bg-background rounded-full" />
                     </div>
-                  </div>
+                    Vibe Check
                 </div>
-              )}
-              <div ref={scrollRef} />
-            </div>
-          </ScrollArea>
+                <div className="flex items-center gap-4">
+                    <ModeToggle />
+                    <Link href="/app">
+                        <Button className="bg-foreground text-background hover:bg-muted font-semibold rounded-full px-6 transition-transform hover:scale-105 active:scale-95">
+                            Launch App <ArrowRight className="w-4 h-4 ml-2" />
+                        </Button>
+                    </Link>
+                </div>
+            </nav>
 
-          <div className="p-4 bg-white border-t border-zinc-200">
-            <div className="relative">
-              <Textarea
-                value={input}
-                onChange={(e) => setInput(e.target.value)}
-                onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSendMessage(); } }}
-                placeholder="Type 'Enable Auto-Pay', or 'Tip GPT'..."
-                className="min-h-[60px] pr-12 resize-none rounded-xl text-sm focus-visible:ring-black"
-              />
-              <Button
-                size="icon"
-                onClick={handleSendMessage}
-                disabled={!input.trim() || isTyping}
-                className="absolute bottom-2 right-2 h-8 w-8 bg-black hover:bg-zinc-800 rounded-lg"
-              >
-                <Send className="w-4 h-4 text-white" />
-              </Button>
-            </div>
-          </div>
-        </ResizablePanel>
+            {/* HERO SECTION */}
+            <main className="relative z-10 flex-1 flex flex-col items-center justify-center text-center px-4 max-w-5xl mx-auto mt-10 sm:mt-20 mb-20">
 
-        <ResizableHandle withHandle className="bg-zinc-100" />
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6 }}
+                    className="mb-6 flex items-center gap-2 px-4 py-1.5 rounded-full border border-white/10 bg-white/5 backdrop-blur-sm"
+                >
+                    <Sparkles className="w-4 h-4 text-yellow-400" />
+                    <span className="text-xs font-medium text-zinc-300">Powered by x402 Protocol</span>
+                </motion.div>
 
-        <ResizablePanel defaultSize={65}>
-          <ResizablePanelGroup direction="horizontal">
-            <ResultPanel
-              name="GPT-4 Turbo"
-              tag="OpenAI"
-              color="text-emerald-600 bg-emerald-50 border-emerald-100"
-              icon={<Zap className="w-3 h-3" />}
-              status={isTyping ? "gen" : (gptResult ? "done" : "idle")}
-              code={gptResult?.code || ""}
-              isWinner={winner === "GPT-4 Turbo"}
-              hasWinner={!!winner}
-            />
+                <motion.h1
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6, delay: 0.1 }}
+                    className="text-5xl sm:text-7xl md:text-8xl font-bold tracking-tighter mb-8"
+                >
+                    Trust <br className="hidden sm:block" />
+                    <span className="text-muted-foreground">but</span> Verify.
+                </motion.h1>
 
-            <ResizableHandle className="bg-zinc-100 w-[1px]" />
+                <motion.p
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6, delay: 0.2 }}
+                    className="text-lg sm:text-xl text-muted-foreground max-w-2xl mb-12 leading-relaxed"
+                >
+                    The first AI coding agent powered by <strong>Consensus Intelligence</strong>.
+                    We verify every line of code across GPT-4 and Gemini to eliminate hallucinations before they reach your contract.
+                </motion.p>
 
-            <ResultPanel
-              name="Gemini 1.5 Pro"
-              tag="Google DeepMind"
-              color="text-blue-600 bg-blue-50 border-blue-100"
-              icon={<Flame className="w-3 h-3" />}
-              status={isTyping ? "gen" : (geminiResult ? "done" : "idle")}
-              code={geminiResult?.code || ""}
-              isWinner={winner === "Gemini 1.5 Pro"}
-              hasWinner={!!winner}
-            />
-          </ResizablePanelGroup>
-        </ResizablePanel>
+                <motion.div
+                    initial={{ opacity: 0, y: 20 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    transition={{ duration: 0.6, delay: 0.3 }}
+                    className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto"
+                >
+                    <Link href="/app" className="w-full sm:w-auto">
+                        <Button size="lg" className="w-full sm:w-auto h-12 px-8 text-base rounded-full">
+                            Start Vibe Checking
+                        </Button>
+                    </Link>
+                    <Link href="https://github.com/your-username/vibe-check" target="_blank" className="w-full sm:w-auto">
+                        <Button size="lg" variant="outline" className="w-full sm:w-auto h-12 px-8 text-base rounded-full">
+                            View on GitHub
+                        </Button>
+                    </Link>
+                </motion.div>
 
-      </ResizablePanelGroup>
-    </main>
-  );
+                {/* HERO VISUAL */}
+                <motion.div
+                    initial={{ opacity: 0, scale: 0.95, y: 40 }}
+                    animate={{ opacity: 1, scale: 1, y: 0 }}
+                    transition={{ duration: 0.8, delay: 0.5, type: "spring" }}
+                    className="mt-20 w-full max-w-4xl border border-border/50 rounded-xl overflow-hidden shadow-2xl bg-card/50 backdrop-blur-xl"
+                >
+                    <div className="h-8 bg-muted/50 border-b border-border/50 flex items-center gap-2 px-4">
+                        <div className="w-3 h-3 rounded-full bg-red-500/20" />
+                        <div className="w-3 h-3 rounded-full bg-yellow-500/20" />
+                        <div className="w-3 h-3 rounded-full bg-green-500/20" />
+                    </div>
+                    <div className="aspect-[16/9] bg-muted/20 p-4 sm:p-8 flex gap-4">
+                        {/* Abstract Code  Blocks */}
+                        <div className="flex-1 bg-muted/50 rounded-lg p-4 border border-border/50 flex flex-col gap-3">
+                            <div className="flex items-center gap-2 mb-2">
+                                <div className="w-6 h-6 rounded bg-emerald-500/20 flex items-center justify-center">
+                                    <Zap className="w-3 h-3 text-emerald-500" />
+                                </div>
+                                <div className="h-2 w-20 bg-emerald-500/20 rounded-full" />
+                            </div>
+                            <div className="h-2 w-3/4 bg-foreground/10 rounded-full" />
+                            <div className="h-2 w-1/2 bg-foreground/10 rounded-full" />
+                            <div className="h-2 w-full bg-foreground/10 rounded-full" />
+                        </div>
+                        <div className="hidden sm:flex w-[1px] bg-border/50" />
+                        <div className="flex-1 bg-muted/50 rounded-lg p-4 border border-border/50 flex flex-col gap-3">
+                            <div className="flex items-center gap-2 mb-2">
+                                <div className="w-6 h-6 rounded bg-blue-500/20 flex items-center justify-center">
+                                    <Bot className="w-3 h-3 text-blue-500" />
+                                </div>
+                                <div className="h-2 w-20 bg-blue-500/20 rounded-full" />
+                            </div>
+                            <div className="h-2 w-3/4 bg-foreground/10 rounded-full" />
+                            <div className="h-2 w-1/2 bg-foreground/10 rounded-full" />
+                            <div className="h-2 w-full bg-foreground/10 rounded-full" />
+                        </div>
+                    </div>
+                </motion.div>
+            </main>
+
+            {/* FEATURES */}
+            <section className="relative z-10 py-24 px-6 border-t border-border/50 bg-muted/30 backdrop-blur-md">
+                <div className="max-w-7xl mx-auto grid grid-cols-1 md:grid-cols-3 gap-8">
+
+                    <div className="bg-card p-8 rounded-2xl border border-border/50 hover:border-border transition-colors">
+                        <ShieldCheck className="w-10 h-10 text-foreground mb-6" />
+                        <h3 className="text-xl font-bold mb-3">Dual-Model Consensus</h3>
+                        <p className="text-muted-foreground leading-relaxed">
+                            We query OpenAI and Gemini simultaneously. If their code diverges, you know there's a problem. Pick the winner.
+                        </p>
+                    </div>
+
+                    <div className="bg-card p-8 rounded-2xl border border-border/50 hover:border-border transition-colors">
+                        <Wallet className="w-10 h-10 text-foreground mb-6" />
+                        <h3 className="text-xl font-bold mb-3">Autonomous Session Wallets</h3>
+                        <p className="text-muted-foreground leading-relaxed">
+                            Fund your agent once. It pays for its own compute and tips models automatically. No wallet popups interrupting your flow.
+                        </p>
+                    </div>
+
+                    <div className="bg-card p-8 rounded-2xl border border-border/50 hover:border-border transition-colors">
+                        <Bot className="w-10 h-10 text-foreground mb-6" />
+                        <h3 className="text-xl font-bold mb-3">Smart Intent Detection</h3>
+                        <p className="text-muted-foreground leading-relaxed">
+                            Chat for free to learn concepts. Activate the expensive consensus engine only when you need production-grade code.
+                        </p>
+                    </div>
+
+                </div>
+            </section>
+
+            {/* HOW IT WORKS */}
+            <section className="relative z-10 py-24 px-6">
+                <div className="max-w-4xl mx-auto">
+                    <motion.div
+                        initial={{ opacity: 0, y: 20 }}
+                        whileInView={{ opacity: 1, y: 0 }}
+                        viewport={{ once: true }}
+                        className="text-center mb-16"
+                    >
+                        <h2 className="text-3xl md:text-5xl font-bold mb-6 tracking-tighter">How it Works</h2>
+                        <p className="text-zinc-400">Your AI coding workflow, reimagined for the crypto era.</p>
+                    </motion.div>
+
+                    <div className="grid gap-12 relative">
+                        {/* Connecting Line (Desktop) */}
+                        <div className="hidden md:block absolute left-[27px] top-8 bottom-8 w-0.5 bg-zinc-800" />
+
+                        {/* STEP 1 */}
+                        <Step
+                            number="1"
+                            title="Connect Wallet"
+                            desc="Login with your favorite Ethereum wallet. We support Coinbase Wallet, MetaMask, Rainbow, and more."
+                        />
+
+                        {/* STEP 2 */}
+                        <Step
+                            number="2"
+                            title="Fund Your Agent"
+                            desc="Type 'Enable Auto-Pay' to send a small budget (e.g. 0.002 ETH) to your local Session Wallet. This allows the AI to pay for itself."
+                        />
+
+                        {/* STEP 3 */}
+                        <Step
+                            number="3"
+                            title="Vibe Check"
+                            desc="Ask for a smart contract. Watch GPT-4 and Gemini generate code in real-time. Compare their logic side-by-side."
+                        />
+
+                        {/* STEP 4 */}
+                        <Step
+                            number="4"
+                            title="Tip the Winner"
+                            desc="See better code? Just type 'Tip GPT'. Your agent instantly executes a micro-payment to the provider. No popups."
+                        />
+                    </div>
+                </div>
+            </section>
+
+            {/* FOOTER */}
+            <footer className="py-12 px-6 border-t border-white/10 text-center text-zinc-500 text-sm">
+                <p>&copy; {new Date().getFullYear()} Vibe Check. Built with ❤️ on the x402 Protocol.</p>
+            </footer>
+
+        </div>
+    );
 }
 
-// Minimal Result Panel (Removed the button since Chat handles it now)
-function ResultPanel({ name, tag, color, icon, status, code, isWinner, hasWinner }: any) {
-  return (
-    <ResizablePanel
-      defaultSize={50}
-      className={`relative flex flex-col h-full transition-colors duration-500 ${isWinner ? "bg-green-50/30" : "bg-white"} ${hasWinner && !isWinner ? "opacity-50 grayscale" : ""}`}
-    >
-      <div className="h-12 border-b border-zinc-100 flex items-center justify-between px-4 bg-white/50 backdrop-blur z-10 flex-shrink-0">
-        <div className="flex items-center gap-2">
-          <span className="font-semibold text-xs text-zinc-700">{name}</span>
-          {isWinner && <Badge className="bg-green-600 text-white hover:bg-green-600 h-5 text-[10px]">🏆 Winner</Badge>}
-        </div>
-        {status !== "idle" && (
-          <Badge variant="outline" className={`text-[10px] h-5 gap-1 border ${color}`}>{icon} {tag}</Badge>
-        )}
-      </div>
-
-      <div className="flex-1 min-h-0 w-full relative">
-        <ScrollArea className="h-full w-full">
-          <div className="p-6 pb-24">
-            {status === "idle" ? (
-              <div className="h-full flex flex-col items-center justify-center pt-20 text-zinc-300 text-xs gap-3">
-                <div className="p-3 bg-zinc-50 rounded-full"><Sparkles className="w-5 h-5 text-zinc-200" /></div>
-                <span>Agent waiting...</span>
-              </div>
-            ) : status === "gen" ? (
-              <div className="h-full flex flex-col items-center justify-center pt-20 text-zinc-400 text-xs gap-3">
-                <Zap className="w-6 h-6 animate-spin text-zinc-200" />
-                <span>Streaming code...</span>
-              </div>
-            ) : (
-              <pre className="font-mono text-[11px] leading-6 text-zinc-600 selection:bg-black selection:text-white whitespace-pre-wrap break-all">
-                {code}
-              </pre>
-            )}
-          </div>
-        </ScrollArea>
-
-        {isWinner && (
-          <div className="absolute bottom-6 left-0 right-0 flex justify-center animate-in zoom-in duration-300 z-20">
-            <Button variant="outline" className="bg-white border-green-200 text-green-700 gap-2 rounded-full cursor-default shadow-sm h-9">
-              <CheckCircle className="w-4 h-4" /> Tip Sent!
-            </Button>
-          </div>
-        )}
-      </div>
-    </ResizablePanel>
-  );
+function Step({ number, title, desc }: { number: string, title: string, desc: string }) {
+    return (
+        <motion.div
+            initial={{ opacity: 0, x: -20 }}
+            whileInView={{ opacity: 1, x: 0 }}
+            viewport={{ once: true }}
+            transition={{ duration: 0.5 }}
+            className="flex gap-6 md:gap-10 relative z-10"
+        >
+            <div className="flex-shrink-0 w-14 h-14 rounded-full bg-zinc-900 border border-zinc-700 flex items-center justify-center text-xl font-bold shadow-[0_0_15px_rgba(255,255,255,0.1)]">
+                {number}
+            </div>
+            <div className="pt-2">
+                <h3 className="text-xl font-bold mb-2">{title}</h3>
+                <p className="text-zinc-400 leading-relaxed max-w-lg">{desc}</p>
+            </div>
+        </motion.div>
+    );
 }
