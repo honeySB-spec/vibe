@@ -26,7 +26,7 @@ export default function LandingPage() {
                 </div>
                 <div className="flex items-center gap-4">
                     <ModeToggle />
-                    <Link href="/app">
+                    <Link href="/zk-login">
                         <Button className="bg-foreground text-background hover:bg-muted font-semibold rounded-full px-6 transition-transform hover:scale-105 active:scale-95">
                             Launch App <ArrowRight className="w-4 h-4 ml-2" />
                         </Button>
@@ -73,7 +73,7 @@ export default function LandingPage() {
                     transition={{ duration: 0.6, delay: 0.3 }}
                     className="flex flex-col sm:flex-row gap-4 w-full sm:w-auto"
                 >
-                    <Link href="/app" className="w-full sm:w-auto">
+                    <Link href="/zk-login" className="w-full sm:w-auto">
                         <Button size="lg" className="w-full sm:w-auto h-12 px-8 text-base rounded-full">
                             Start Vibe Checking
                         </Button>
